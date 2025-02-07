@@ -1,0 +1,3 @@
+[submodule "ModernBERT"]
+	path = ModernBERT
+	url = https://github.com/GauthierRoy/ModernBERT
