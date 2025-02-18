@@ -13,7 +13,7 @@ conda activate mbertft
 export HF_TOKEN=<your token here>
 
 # optional, wandb login token
-export WANDB_TOKEN=<your token here>
+export WANDB_API_KEY=<your token here>
 
 # ensure you are in the directory where the .sbatch file is located
 srun sbatch test.sbatch

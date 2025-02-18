@@ -8,6 +8,7 @@
 
 cd $SLURM_SUBMIT_DIR
 
+module unload anaconda3
 module load anaconda3
 conda activate mbertft
 

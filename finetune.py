@@ -21,6 +21,21 @@ from transformers import (
     Trainer
 )
 
+use_wandb = False
+
+if use_wandb:
+    wandb_api_key = os.getenv("WANDB_API_KEY")
+    if wandb_api_key:
+        import wandb
+        wandb.login(key=wandb_api_key)
+        report_to = "wandb"
+    else:
+        raise KeyError("WANDB_API_KEY environment variable is not set. Set this variable with your api key.")
+
+else:
+    os.environ["WANDB_MODE"] = "disabled"
+    report_to = None
+
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -124,6 +139,7 @@ training_args = TrainingArguments(
     bf16_full_eval=True,
     push_to_hub=False,
     disable_tqdm=True,
+    report_to = report_to
 )
 
 
@@ -138,9 +154,9 @@ trainer = Trainer(
     compute_metrics=compute_metrics
 )
 
-wandb_token = os.getenv("WANDB_TOKEN")
-if wandb_token is not None:
-    import wandb
-    wandb.login(key=wandb_token)
+
 
 trainer.train()
+
+if use_wandb:
+    wandb.finish()
