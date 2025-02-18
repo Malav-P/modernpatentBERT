@@ -4,7 +4,7 @@
 #SBATCH -t1:00:00                        # Duration of the job (Ex: 1 hour) 
 #SBATCH -oReport-%j.out
 #SBATCH --mail-type=BEGIN,END,FAIL       # Mail preferences 
-#SBATCH --mail-user=mpatel636@gatech.edu # E-mail address for notifications 
+#SBATCH --mail-user=$EMAIL_SBATCH # E-mail address for notifications 
 
 cd $SLURM_SUBMIT_DIR
 
