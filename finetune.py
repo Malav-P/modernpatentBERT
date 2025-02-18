@@ -11,7 +11,6 @@ import torch
 
 from sklearn.preprocessing import LabelEncoder
 
-from huggingface_hub import login
 from datasets import load_dataset
 from transformers import (
     AutoTokenizer,
@@ -21,46 +20,51 @@ from transformers import (
     Trainer
 )
 
-use_wandb = False
+YELLOW = '\033[33m'
+RESET = '\033[0m'
 
-if use_wandb:
-    wandb_api_key = os.getenv("WANDB_API_KEY")
-    if wandb_api_key:
-        import wandb
-        wandb.login(key=wandb_api_key)
-        report_to = "wandb"
-    else:
-        raise KeyError("WANDB_API_KEY environment variable is not set. Set this variable with your api key.")
+
+wandb_api_key = os.getenv("WANDB_API_KEY")
+if wandb_api_key:
+    import wandb
+    wandb.login(key=wandb_api_key)
+    report_to = "wandb"
 
 else:
+    print(f"{YELLOW}Warning: wandb api key not found, wandb is disabled for this run.{RESET}", flush=True)
     os.environ["WANDB_MODE"] = "disabled"
     report_to = None
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
+if device == "cpu":
+    print(f"{YELLOW}Warning: cuda capable device not found, using cpu...{RESET}", flush=True)
 
 hf_token = os.getenv("HF_TOKEN")
 patents = load_dataset("MalavP/USPTO-3M", split="train", use_auth_token = hf_token)
 # Split the dataset: 90% for "dummy" (discarded), 10% for the subset
 mini_patents = patents.train_test_split(
-    test_size=0.01,  # 10% of the original data
+    test_size=0.01,  # 1% of the original data
     shuffle=True,   # Randomize selection
     seed=42         # For reproducibility
 )["test"]           # Keep the 10% test split
 
 mini_patents = mini_patents.rename_column("cpc_ids", "labels")
 mini_patents = mini_patents.map(lambda x: {'labels': x['labels'].split(',')})
-unique_labels = set(item for sublist in mini_patents["labels"] for item in sublist)
+unique_labels = {label for sublist in mini_patents["labels"] for label in sublist}
+NUM_LABELS = len(unique_labels)
 
 
 # Initialize and fit the LabelEncoder
-label_encoder = LabelEncoder()
-label_encoder.fit(list(unique_labels))
+label_encoder = LabelEncoder().fit(list(unique_labels))
 
 def convert_labels(example):
-    indices =  [label_encoder.transform([label])[0] for label in example['labels']]
-    example["labels"] = [float(i in indices) for i in range(len(unique_labels))] # BCELossWithLogits requires target to contain floating point labels
+    indices = label_encoder.transform(example['labels'])
+    labels = np.zeros(NUM_LABELS, dtype=float)
+    labels[indices] = 1.0 # BCELossWithLogits requires target to contain floating point labels
+    example["labels"] = labels
     return example
 
 # Apply the transformation to the dataset
@@ -68,9 +72,6 @@ mini_patents = mini_patents.map(convert_labels)
 split_datasets = mini_patents.train_test_split(test_size=0.05, seed=42)
 train_dataset = split_datasets["train"]
 eval_dataset = split_datasets["test"]
-
-# Verify the size
-# print(f"Original size: {len(patents)}, Subset size: {len(mini_patents)}")
 
 # Model id to load the tokenizer
 model_id = "answerdotai/ModernBERT-base"
@@ -89,7 +90,7 @@ eval_dataset = eval_dataset.map(tokenize, batched=True)
 hf_data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
 # 6. Load the model for sequence classification (adjust num_labels as needed).
-model = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=len(unique_labels)).to(device)
+model = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=NUM_LABELS).to(device)
 model.config.problem_type= "multi_label_classification"
 
 
@@ -138,7 +139,7 @@ training_args = TrainingArguments(
     bf16=True,
     bf16_full_eval=True,
     push_to_hub=False,
-    disable_tqdm=True,
+    disable_tqdm=False,
     report_to = report_to
 )
 
@@ -158,5 +159,5 @@ trainer = Trainer(
 
 trainer.train()
 
-if use_wandb:
+if wandb_api_key:
     wandb.finish()
