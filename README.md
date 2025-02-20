@@ -2,7 +2,7 @@
 
 ## Environment Creation
 ```bash
-conda env create -f environment.yaml # this should install flash attention by default
+conda env create -f environment.yml # this should install flash attention by default
 
 conda activate mbertft
 ```
