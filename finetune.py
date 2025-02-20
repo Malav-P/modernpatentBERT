@@ -50,17 +50,6 @@ if CLEAR_TOKEN_CACHE:
 
 
 
-wandb_api_key = os.getenv("WANDB_API_KEY")
-if wandb_api_key:
-    import wandb
-    wandb.login(key=wandb_api_key)
-    report_to = "wandb"
-    wandb.init(project="patent-bert")
-
-else:
-    print(f"{YELLOW}Warning: wandb api key not found, wandb is disabled for this run.{RESET}", flush=True)
-    os.environ["WANDB_MODE"] = "disabled"
-    report_to = None
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -94,6 +83,7 @@ mini_patents = mini_patents.map(
     batch_size=1000,  # Adjust based on memory
     num_proc=6  # For 8 CPUs, leave 2 cores free
 )
+# import json
 
 # def save_class_statistics(dataset, output_file):
 #     """
@@ -106,11 +96,13 @@ mini_patents = mini_patents.map(
 #     all_labels = [label for sublist in dataset["labels"] for label in sublist]
 #     counts = Counter(all_labels)
 #     total_unique = len(counts)
-#     with open(output_file, "w") as f:
-#         f.write(f"Total number of unique classes: {total_unique}\n")
-#         f.write("Occurrences of each class:\n")
-#         for label, count in counts.items():
-#             f.write(f"{label}: {count}\n")
+    
+#     stats = {"total_unique": total_unique, "counts": dict(counts)}
+    
+#     # Write to file
+#     with open(output_file, 'w') as f:
+#         json.dump(stats, f, indent=4)
+    
 #     print(f"Class statistics saved to {output_file}")
 
 # save_class_statistics(mini_patents,"stats.txt")
@@ -203,6 +195,19 @@ n_epochs = 2
 eps = 1e-6
 wd = 8e-6
 task = "your_task_name"  # Set this to an appropriate identifier for your task
+
+wandb_api_key = os.getenv("WANDB_API_KEY")
+if wandb_api_key:
+    import wandb
+    wandb.login(key=wandb_api_key)
+    report_to = "wandb"
+    wandb.init(project="patent-bert")
+
+else:
+    print(f"{YELLOW}Warning: wandb api key not found, wandb is disabled for this run.{RESET}", flush=True)
+    os.environ["WANDB_MODE"] = "disabled"
+    report_to = None
+
 # 8. Define training arguments using your specified hyperparameters.
 training_args = TrainingArguments(
     output_dir=f"aai_ModernBERT_{task}_ft",
