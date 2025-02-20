@@ -1,15 +1,20 @@
 #!/bin/bash
-#SBATCH --job-name=FINETUNE_SCRIPT_TEST               # Job name  
-#SBATCH --gres=gpu:H200:1                # GPU type (L40S. H200. etc) and number of GPUs 
-#SBATCH -t1:00:00                        # Duration of the job (Ex: 1 hour) 
+#SBATCH --job-name=FINETUNE_SCRIPT_TEST
+#SBATCH --gres=gpu:H200:1 --cpus-per-gpu=8
+#SBATCH -t8:00:00
 #SBATCH -oReport-%j.out
-#SBATCH --mail-type=BEGIN,END,FAIL       # Mail preferences 
-#SBATCH --mail-user=$EMAIL_SBATCH # E-mail address for notifications 
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=groy8@gatech.edu
 
-cd $SLURM_SUBMIT_DIR
+# Initialize Conda (Mamba uses the same initialization)
+source ~/.bashrc  # Load your shell config
+eval "$(mamba shell hook --shell bash)"  # Initialize mamba
+mamba activate mbertft 
 
-module unload anaconda3
-module load anaconda3
-conda activate mbertft
+echo "Using Python at: $(which python)"
+echo "Python version: $(python --version)"
+# Debug: Check PyTorch and environment
+echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)')"
+echo "Conda environment: $CONDA_PREFIX"
 
-python3 finetune.py
+python3 finetune2.py
