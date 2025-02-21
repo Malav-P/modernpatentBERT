@@ -9,6 +9,7 @@ import torch
 import numpy as np
 import torch
 from pathlib import Path
+import shutil
 
 from sklearn.preprocessing import LabelEncoder
 
@@ -27,12 +28,12 @@ from dotenv import load_dotenv
 load_dotenv()
 YELLOW = '\033[33m'
 RESET = '\033[0m'
-RATIO_SIZE_OG_DATASET = float(os.getenv("RATIO_SIZE_OG_DATASET",0.5))
+RATIO_SIZE_OG_DATASET = 0.3
 #use the cache or not
-CACHE_TOKENIZED = True
+CACHE_TOKENIZED = False
 #remove the cache
-CLEAR_TOKEN_CACHE=True
-
+CLEAR_TOKEN_CACHE=False
+SAVE_MODEL = False
 
 # Define cache path
 CACHE_DIR = Path.home() / "scratch/.cache/modernBert"
@@ -42,13 +43,12 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 cache_file_path = os.path.join(CACHE_DIR, "eval_tokenized.arrow")
 #clear the cache
 if CLEAR_TOKEN_CACHE:
-    if os.path.exists(cache_file_path):
-        os.remove(cache_file_path)
-        print(f"Cache cleared: {cache_file_path}")
-    else:
-        print(f"No cache file found at: {cache_file_path}")
-
-
+    print("Clearing cache")
+    for file in CACHE_DIR.glob("*"):  # Select all files and folders
+        if file.is_file():
+            file.unlink()  # Delete file
+        elif file.is_dir():
+            shutil.rmtree(file)  
 
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -134,7 +134,9 @@ tokenizer = AutoTokenizer.from_pretrained(model_id)
 # # Tokenize helper function
 def tokenize(batch):
     # return tokenizer(batch['text'], padding='max_length', truncation=True, return_tensors="pt")
-    return tokenizer(batch['text'], truncation=True, padding=True, max_length=1024, return_tensors="pt")
+    # return tokenizer(batch['text'], truncation=True, padding=True, max_length=1024, return_tensors="pt")
+    return tokenizer(batch['text'], truncation=True, padding=True, max_length=1024)
+
 
 # # Tokenize dataset
 
@@ -146,6 +148,10 @@ tokenize_kwargs = {
         "batch_size": 1000,
         "num_proc": 6
     }
+
+if CACHE_TOKENIZED:
+    tokenize_kwargs["cache_file_name"] = cache_file_path
+
 mini_patents = mini_patents.map(
     tokenize,
     **tokenize_kwargs,
@@ -171,20 +177,36 @@ model = AutoModelForSequenceClassification.from_pretrained(
 model.config.problem_type= "multi_label_classification"
 
 # 7. Define a compute_metrics function to compute accuracy.
-def compute_metrics(eval_pred):
-    predictions, labels = eval_pred # shape (N, num classes) and shape (N, num classes)
-    pred_labels = np.argmax(predictions, axis=-1)  # shape (N,)
+#def compute_metrics(eval_pred):
+#    predictions, labels = eval_pred # shape (N, num classes) and shape (N, num classes)
+#    pred_labels = np.argmax(predictions, axis=-1)  # shape (N,)
 
     # Assuming labels are lists of labels, check if pred_labels are in any of the true labels
-    correct = 0
-    total = len(labels)
+#    correct = 0
+#    total = len(labels)
 
-    for pred, true_labels in zip(pred_labels, labels):
-        correct += true_labels[pred]
+#    for pred, true_labels in zip(pred_labels, labels):
+#        correct += true_labels[pred]
 
     # Accuracy calculation
-    accuracy = correct / total
-    return {"accuracy": accuracy}
+#    accuracy = correct / total
+#    return {"accuracy": accuracy}
+
+from sklearn.metrics import accuracy_score, f1_score
+
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    # Convert logits to probabilities
+    probs = torch.sigmoid(torch.tensor(logits)).numpy()
+    # Apply threshold for binary predictions
+    threshold = 0.5
+    preds = (probs >= threshold).astype(int)
+    
+    return {
+        "accuracy": accuracy_score(labels, preds),
+        "micro_f1": f1_score(labels, preds, average="micro"),
+        "macro_f1": f1_score(labels, preds, average="macro")
+    }
 
 
 # Set your hyperparameters and task identifier
@@ -221,9 +243,11 @@ training_args = TrainingArguments(
     adam_beta2=betas[1],
     adam_epsilon=eps,
     weight_decay=wd,
-    logging_strategy="epoch",
-    eval_strategy="epoch",
-    save_strategy="epoch",
+    logging_strategy="steps",
+    logging_steps=100,          # Log every 100 steps
+    eval_strategy="steps",      # Evaluate every 500 steps
+    eval_steps=100,
+    save_strategy="steps",
     load_best_model_at_end=True,
     bf16=True,
     bf16_full_eval=True,
@@ -248,5 +272,8 @@ trainer = Trainer(
 
 trainer.train()
 
+
 if wandb_api_key:
     wandb.finish()
+if SAVE_MODEL:
+    trainer.save_model("model/")

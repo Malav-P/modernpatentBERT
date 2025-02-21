@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=FINETUNE_SCRIPT_TEST
-#SBATCH --gres=gpu:H200:1 --cpus-per-gpu=8
+#SBATCH --gres=gpu:A100:1 --cpus-per-gpu=8
 #SBATCH -t8:00:00
 #SBATCH -oReport-%j.out
 #SBATCH --mail-type=BEGIN,END,FAIL
@@ -17,4 +17,4 @@ echo "Python version: $(python --version)"
 echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)')"
 echo "Conda environment: $CONDA_PREFIX"
 
-python3 finetune2.py
+python3 finetune.py
