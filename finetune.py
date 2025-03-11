@@ -21,8 +21,6 @@ from transformers import (
     TrainingArguments,
     Trainer
 )
-from collections import Counter
-
 from dotenv import load_dotenv
 
 load_dotenv()
