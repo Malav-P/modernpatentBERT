@@ -1,46 +1,14 @@
 import os
 import argparse
+
 from dotenv import load_dotenv
-from datasets import load_dataset
 from transformers import (
-    AutoTokenizer,
-    AutoModelForMaskedLM,
-    DataCollatorForLanguageModeling,
     TrainingArguments,
     Trainer
 )
 
-def get_modernbert():
-    model = AutoModelForMaskedLM.from_pretrained("answerdotai/ModernBERT-base", device_map="auto")
-    return model
-
-def dataset_for_mlm(test_size = 0.01, mlm_probability = 0.3):
-    
-    dataset = load_dataset("MalavP/USPTO-3M", split="train")
-    model_name = "answerdotai/ModernBERT-base" 
-    tokenizer = AutoTokenizer.from_pretrained(model_name) 
-
-    # Tokenization function
-    def transform(batch):
-        batch["text"] = [text for text in batch["text"] if text is not None and text.strip() != ""]
-
-        return tokenizer(batch["text"], truncation=True, padding=True, max_length=1024)
-
-    dataset.set_transform(transform)
-
-    data_collator = DataCollatorForLanguageModeling(
-        tokenizer=tokenizer,
-        mlm=True,
-        mlm_probability=mlm_probability  # 30% of tokens are masked
-    )
-
-    dataset = dataset.train_test_split(
-        test_size=test_size,  # 10% of the original data
-        shuffle=True,   # Randomize selection
-        seed=42         # For reproducibility
-    ) 
-
-    return dataset, data_collator
+from preprocessing import get_modernbert
+from preprocessing import get_dataset
 
 
 if __name__ == "__main__":
@@ -50,6 +18,60 @@ if __name__ == "__main__":
         '--disable-tqdm',
         action='store_true',
         help='Disable tqdm progress bars if specified.'
+    )
+    parser.add_argument(
+        '--epochs',
+        default=1,
+        type=int,
+        help="number of epochs to train"
+    )
+    parser.add_argument(
+        '--batchsize',
+        default=96,
+        type=int,
+        help="per device batch size"
+    )
+    parser.add_argument(
+        '--lr',
+        default = 8e-4,
+        type=float,
+        help="learning rate"
+    )
+    parser.add_argument(
+        '--beta1',
+        default=0.9,
+        type=float,
+        help="beta 1 hyperparameter for adam"
+    )
+    parser.add_argument(
+        '--beta2',
+        default=0.98,
+        type=float,
+        help="beta 2 hyperparameter for adam"
+    )
+    parser.add_argument(
+        '--weight-decay',
+        default=1e-6,
+        type=float,
+        help="weight decay (i.e. L2 regularization)"
+    )
+    parser.add_argument(
+        '--eval-steps',
+        default=10000,
+        type=int,
+        help="number of training steps between each eval"
+    )
+    parser.add_argument(
+        '--logging-steps',
+        default=10,
+        type=int,
+        help="number of train steps between each log"
+    )
+    parser.add_argument(
+        '--resume-from-checkpoint',
+        default=False,
+        type=bool,
+        help="whether to resume training from checkpoint"
     )
     args = parser.parse_args()
     
@@ -65,22 +87,22 @@ if __name__ == "__main__":
     training_args = TrainingArguments(
         output_dir=f"ModernBERT_pretrain",
         overwrite_output_dir = True,
-        learning_rate=8e-4,
-        per_device_train_batch_size=96,
-        per_device_eval_batch_size=96,
-        num_train_epochs=2,
+        learning_rate=args.lr,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
+        num_train_epochs=args.epochs,
         lr_scheduler_type="linear",
         optim="adamw_torch",
-        adam_beta1=0.9,
-        adam_beta2=0.98,
+        adam_beta1=args.beta1,
+        adam_beta2=args.beta2,
         adam_epsilon=1e-6,
-        weight_decay=1e-6,
+        weight_decay=args.weight_decay,
         logging_strategy="steps",
-        logging_steps=100,          # Log every 100 steps
+        logging_steps=args.logging_steps,          # Log every 100 steps
         eval_strategy="steps",      
-        eval_steps=1000,
+        eval_steps=args.eval_steps,
         save_strategy="steps",
-        save_steps=1000,
+        save_steps=args.eval_steps,
         save_total_limit=5,
         load_best_model_at_end=True,
         bf16=True,
@@ -91,8 +113,9 @@ if __name__ == "__main__":
         report_to = report_to
     )
 
-    model = get_modernbert()
-    dataset, collator = dataset_for_mlm()
+    
+    dataset, collator, _ = get_dataset(task="mlm")
+    model = get_modernbert(task="mlm")
 
     trainer = Trainer(
         model=model,
@@ -101,4 +124,4 @@ if __name__ == "__main__":
         eval_dataset=dataset["test"],
         data_collator=collator)
     
-    trainer.train()
+    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)

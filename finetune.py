@@ -1,196 +1,16 @@
-# to start jupyter server
-# salloc -G <GPU name here>:1
-
-# conda activate mberft
-# jupyter notebook --ip=0.0.0.0 --port=8888
-
+import argparse
 import os
 import torch
-import numpy as np
-import torch
-from pathlib import Path
-import shutil
 
-from sklearn.preprocessing import LabelEncoder
-
-from datasets import load_dataset
+from dotenv import load_dotenv
+from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 from transformers import (
-    AutoTokenizer,
-    AutoModelForSequenceClassification,
-    DataCollatorWithPadding,
     TrainingArguments,
     Trainer
 )
-from dotenv import load_dotenv
 
-load_dotenv()
-YELLOW = '\033[33m'
-RESET = '\033[0m'
-RATIO_SIZE_OG_DATASET = 0.3
-#use the cache or not
-CACHE_TOKENIZED = False
-#remove the cache
-CLEAR_TOKEN_CACHE=False
-SAVE_MODEL = False
-
-# Define cache path
-CACHE_DIR = Path.home() / "scratch/.cache/modernBert"
-
-# Create the directory if it doesn’t exist
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
-cache_file_path = os.path.join(CACHE_DIR, "eval_tokenized.arrow")
-#clear the cache
-if CLEAR_TOKEN_CACHE:
-    print("Clearing cache")
-    for file in CACHE_DIR.glob("*"):  # Select all files and folders
-        if file.is_file():
-            file.unlink()  # Delete file
-        elif file.is_dir():
-            shutil.rmtree(file)  
-
-
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-if device == "cpu":
-    print(f"{YELLOW}Warning: cuda capable device not found, using cpu...{RESET}", flush=True)
-
-hf_token = os.getenv("HF_TOKEN")
-
-patents = load_dataset("MalavP/USPTO-3M", split="train")
-# Split the dataset: 90% for "dummy" (discarded), 10% for the subset
-mini_patents = patents.train_test_split(
-    test_size=RATIO_SIZE_OG_DATASET,  # 10% of the original data
-    shuffle=True,   # Randomize selection
-    seed=42         # For reproducibility
-)["test"]           # Keep the 10% test split
-# mini_patents = patents
-
-mini_patents = mini_patents.rename_column("cpc_ids", "labels")
-# mini_patents = mini_patents.map(lambda x: {'labels': x['labels'].split(',')})
-def preprocess_labels(batch):
-    return {
-        # Split each string in the batch
-        'labels': [labels_str.split(',') for labels_str in batch['labels']]
-    }
-
-mini_patents = mini_patents.map(
-    preprocess_labels,
-    batched=True,  # Required for multiprocessing
-    batch_size=1000,  # Adjust based on memory
-    num_proc=6  # For 8 CPUs, leave 2 cores free
-)
-# import json
-
-# def save_class_statistics(dataset, output_file):
-#     """
-#     Calculates:
-#       1. The total number of unique classes
-#       2. The total number of occurrences of each class
-#     and writes the results to a text file.
-#     """
-#     # Flatten the list of lists
-#     all_labels = [label for sublist in dataset["labels"] for label in sublist]
-#     counts = Counter(all_labels)
-#     total_unique = len(counts)
-    
-#     stats = {"total_unique": total_unique, "counts": dict(counts)}
-    
-#     # Write to file
-#     with open(output_file, 'w') as f:
-#         json.dump(stats, f, indent=4)
-    
-#     print(f"Class statistics saved to {output_file}")
-
-# save_class_statistics(mini_patents,"stats.txt")
-
-unique_labels = {label for sublist in mini_patents["labels"] for label in sublist}
-NUM_LABELS = len(unique_labels)
-
-
-# Initialize and fit the LabelEncoder
-label_encoder = LabelEncoder().fit(list(unique_labels))
-
-def convert_labels(example):
-    indices = label_encoder.transform(example['labels'])
-    labels = np.zeros(NUM_LABELS, dtype=float)
-    labels[indices] = 1.0 # BCELossWithLogits requires target to contain floating point labels
-    example["labels"] = labels
-    return example
-
-# Apply the transformation to the dataset
-mini_patents = mini_patents.map(convert_labels)
-
-
-
-# Model id to load the tokenizer
-model_id = "answerdotai/ModernBERT-base"
-# Load Tokenizer
-tokenizer = AutoTokenizer.from_pretrained(model_id)
- 
-# # Tokenize helper function
-def tokenize(batch):
-    # return tokenizer(batch['text'], padding='max_length', truncation=True, return_tensors="pt")
-    # return tokenizer(batch['text'], truncation=True, padding=True, max_length=1024, return_tensors="pt")
-    return tokenizer(batch['text'], truncation=True, padding=True, max_length=1024)
-
-
-# # Tokenize dataset
-
-# train_dataset = train_dataset.map(tokenize, batched=True)
-# eval_dataset = eval_dataset.map(tokenize, batched=True)
-
-tokenize_kwargs = {
-        "batched": True,
-        "batch_size": 1000,
-        "num_proc": 6
-    }
-
-if CACHE_TOKENIZED:
-    tokenize_kwargs["cache_file_name"] = cache_file_path
-
-mini_patents = mini_patents.map(
-    tokenize,
-    **tokenize_kwargs,
-)
-
-split_datasets = mini_patents.train_test_split(test_size=0.05, seed=42)
-train_dataset = split_datasets["train"]
-eval_dataset = split_datasets["test"]
-
-hf_data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-
-torch.cuda.empty_cache()
-torch.cuda.init()  # Add this line
-
-# 6. Load the model for sequence classification (adjust num_labels as needed).
-# model = AutoModelForSequenceClassification.from_pretrained(model_id, num_labels=NUM_LABELS,use_flash_attention_2=True).to(device)
-model = AutoModelForSequenceClassification.from_pretrained(
-    model_id,
-    num_labels=NUM_LABELS,
-    device_map="auto",  # Automatic GPU placement
-    torch_dtype=torch.bfloat16  # Matches your training args
-)
-model.config.problem_type= "multi_label_classification"
-
-# 7. Define a compute_metrics function to compute accuracy.
-#def compute_metrics(eval_pred):
-#    predictions, labels = eval_pred # shape (N, num classes) and shape (N, num classes)
-#    pred_labels = np.argmax(predictions, axis=-1)  # shape (N,)
-
-    # Assuming labels are lists of labels, check if pred_labels are in any of the true labels
-#    correct = 0
-#    total = len(labels)
-
-#    for pred, true_labels in zip(pred_labels, labels):
-#        correct += true_labels[pred]
-
-    # Accuracy calculation
-#    accuracy = correct / total
-#    return {"accuracy": accuracy}
-
-from sklearn.metrics import accuracy_score, f1_score
+from preprocessing import get_modernbert
+from preprocessing import get_dataset
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
@@ -199,79 +19,132 @@ def compute_metrics(eval_pred):
     # Apply threshold for binary predictions
     threshold = 0.5
     preds = (probs >= threshold).astype(int)
+
+    acc = accuracy_score(labels, preds)
+    prec_mac, rec_mac, f1_mac, _ = precision_recall_fscore_support(labels, preds, average="macro")
+    prec_mic, rec_mic, f1_mic, _ = precision_recall_fscore_support(labels, preds, average="micro")
     
     return {
-        "accuracy": accuracy_score(labels, preds),
-        "micro_f1": f1_score(labels, preds, average="micro"),
-        "macro_f1": f1_score(labels, preds, average="macro")
+        "accuracy": acc,
+        "micro_f1": f1_mic,
+        "macro_f1": f1_mac,
+        "micro_recall": rec_mic,
+        "macro_recall": rec_mac,
+        "micro_precision": prec_mic,
+        "macro_precision": prec_mac
     }
 
 
-# Set your hyperparameters and task identifier
-train_bsz, val_bsz = 32, 32
-lr = 8e-5 # the authors use 2e-5
-betas = (0.9, 0.98)
-n_epochs = 2
-eps = 1e-6
-wd = 8e-6
-task = "your_task_name"  # Set this to an appropriate identifier for your task
+if __name__ == "__main__":
 
-wandb_api_key = os.getenv("WANDB_API_KEY")
-if wandb_api_key:
-    import wandb
-    wandb.login(key=wandb_api_key)
-    report_to = "wandb"
-    wandb.init(project="patent-bert")
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--disable-tqdm',
+        action='store_true',
+        help='Disable tqdm progress bars if specified.'
+    )
+    parser.add_argument(
+        '--epochs',
+        default=1,
+        type=int,
+        help="number of epochs to train"
+    )
+    parser.add_argument(
+        '--batchsize',
+        default=32,
+        type=int,
+        help="per device batch size"
+    )
+    parser.add_argument(
+        '--lr',
+        default = 8e-5,
+        type=float,
+        help="learning rate"
+    )
+    parser.add_argument(
+        '--beta1',
+        default=0.9,
+        type=float,
+        help="beta 1 hyperparameter for adam"
+    )
+    parser.add_argument(
+        '--beta2',
+        default=0.98,
+        type=float,
+        help="beta 2 hyperparameter for adam"
+    )
+    parser.add_argument(
+        '--weight-decay',
+        default=8e-6,
+        type=float,
+        help="weight decay (i.e. L2 regularization)"
+    )
+    parser.add_argument(
+        '--eval-steps',
+        default=500,
+        type=int,
+        help="number of training steps between each eval and equivalently between each checkpoint"
+    )
+    parser.add_argument(
+        '--logging-steps',
+        default=10,
+        type=int,
+        help="number of train steps between each log"
+    )
+    parser.add_argument(
+        '--resume-from-checkpoint',
+        action="store_true",
+        help="whether to resume from latest checkpoint"
+    )
+    args = parser.parse_args()
+    
+    # load environment variables
+    load_dotenv()
+    if os.environ["WANDB_API_KEY"]:
+        print("Found WANDB_API_KEY, logging to wandb...")
+        report_to = "wandb"
+    else:
+        os.environ["WANDB_DISABLED"] = "true"
+        report_to = "none"
 
-else:
-    print(f"{YELLOW}Warning: wandb api key not found, wandb is disabled for this run.{RESET}", flush=True)
-    os.environ["WANDB_MODE"] = "disabled"
-    report_to = None
+    training_args = TrainingArguments(
+        output_dir=f"aai_ModernBERT_ft",
+        learning_rate=args.lr,
+        per_device_train_batch_size=args.batchsize,
+        per_device_eval_batch_size=args.batchsize,
+        num_train_epochs=args.epochs,
+        lr_scheduler_type="linear",
+        optim="adamw_torch",
+        adam_beta1=args.beta1,
+        adam_beta2=args.beta2,
+        adam_epsilon=1e-6,
+        weight_decay=args.weight_decay,
+        logging_strategy="steps",
+        logging_steps=args.logging_steps,         
+        eval_strategy="steps",      
+        eval_steps=args.eval_steps,
+        save_strategy="steps",
+        save_steps=5*args.eval_steps,
+        save_total_limit=5,
+        load_best_model_at_end=True,
+        bf16=True,
+        bf16_full_eval=True,
+        push_to_hub=False,
+        disable_tqdm=args.disable_tqdm,
+        remove_unused_columns = False,
+        report_to = report_to
+    )
 
-# 8. Define training arguments using your specified hyperparameters.
-training_args = TrainingArguments(
-    output_dir=f"aai_ModernBERT_{task}_ft",
-    learning_rate=lr,
-    per_device_train_batch_size=train_bsz,
-    per_device_eval_batch_size=val_bsz,
-    num_train_epochs=n_epochs,
-    lr_scheduler_type="linear",
-    optim="adamw_torch",
-    adam_beta1=betas[0],
-    adam_beta2=betas[1],
-    adam_epsilon=eps,
-    weight_decay=wd,
-    logging_strategy="steps",
-    logging_steps=100,          # Log every 100 steps
-    eval_strategy="steps",      # Evaluate every 500 steps
-    eval_steps=100,
-    save_strategy="steps",
-    load_best_model_at_end=True,
-    bf16=True,
-    bf16_full_eval=True,
-    push_to_hub=False,
-    disable_tqdm=False,
-    report_to = report_to
-)
+    dataset, collator, num_labels = get_dataset(task="cls") # num labels is 665
+    model = get_modernbert(task="cls", num_labels=num_labels)
+    
 
-
-
-# 9. Create the Trainer with the compute_metrics function.
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=eval_dataset,
-    data_collator=hf_data_collator,
-    compute_metrics=compute_metrics
-)
-
-
-
-trainer.train()
-
-
-if wandb_api_key:
-    wandb.finish()
-if SAVE_MODEL:
-    trainer.save_model("model/")
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=dataset["train"],
+        eval_dataset=dataset["test"],
+        data_collator=collator,
+        compute_metrics=compute_metrics)
+    
+    trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
