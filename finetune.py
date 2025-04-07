@@ -113,6 +113,7 @@ if __name__ == "__main__":
         per_device_train_batch_size=args.batchsize,
         per_device_eval_batch_size=args.batchsize,
         num_train_epochs=args.epochs,
+        # max_steps=10,
         lr_scheduler_type="linear",
         optim="adamw_torch",
         adam_beta1=args.beta1,
@@ -148,3 +149,5 @@ if __name__ == "__main__":
         compute_metrics=compute_metrics)
     
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
+
+    trainer.save_model("model_mbert/")
