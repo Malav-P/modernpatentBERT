@@ -298,3 +298,4 @@ dependencies:
   - pip:
       - einops==0.8.1
       - flash-attn==2.7.4.post1
+      - python-dotenv==1.0.1

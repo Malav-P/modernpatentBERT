@@ -1,9 +1,7 @@
-import argparse
 import os
-import torch
+import argparse
 
 from dotenv import load_dotenv
-from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 from transformers import (
     TrainingArguments,
     Trainer
@@ -11,28 +9,6 @@ from transformers import (
 
 from preprocessing import get_modernbert
 from preprocessing import get_dataset
-
-def compute_metrics(eval_pred):
-    logits, labels = eval_pred
-    # Convert logits to probabilities
-    probs = torch.sigmoid(torch.tensor(logits)).numpy()
-    # Apply threshold for binary predictions
-    threshold = 0.5
-    preds = (probs >= threshold).astype(int)
-
-    acc = accuracy_score(labels, preds)
-    prec_mac, rec_mac, f1_mac, _ = precision_recall_fscore_support(labels, preds, average="macro")
-    prec_mic, rec_mic, f1_mic, _ = precision_recall_fscore_support(labels, preds, average="micro")
-    
-    return {
-        "accuracy": acc,
-        "micro_f1": f1_mic,
-        "macro_f1": f1_mac,
-        "micro_recall": rec_mic,
-        "macro_recall": rec_mac,
-        "micro_precision": prec_mic,
-        "macro_precision": prec_mac
-    }
 
 
 if __name__ == "__main__":
@@ -51,13 +27,13 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         '--batchsize',
-        default=32,
+        default=96,
         type=int,
         help="per device batch size"
     )
     parser.add_argument(
         '--lr',
-        default = 8e-5,
+        default = 8e-4,
         type=float,
         help="learning rate"
     )
@@ -75,15 +51,15 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         '--weight-decay',
-        default=8e-6,
+        default=1e-6,
         type=float,
         help="weight decay (i.e. L2 regularization)"
     )
     parser.add_argument(
         '--eval-steps',
-        default=500,
+        default=10000,
         type=int,
-        help="number of training steps between each eval and equivalently between each checkpoint"
+        help="number of training steps between each eval"
     )
     parser.add_argument(
         '--logging-steps',
@@ -93,8 +69,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         '--resume-from-checkpoint',
-        action="store_true",
-        help="whether to resume from latest checkpoint"
+        default=False,
+        type=bool,
+        help="whether to resume training from checkpoint"
     )
     args = parser.parse_args()
     
@@ -108,12 +85,12 @@ if __name__ == "__main__":
         report_to = "none"
 
     training_args = TrainingArguments(
-        output_dir=f"aai_ModernBERT_ft",
+        output_dir=f"ModernBERT_pretrain",
+        overwrite_output_dir = True,
         learning_rate=args.lr,
-        per_device_train_batch_size=args.batchsize,
-        per_device_eval_batch_size=args.batchsize,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
         num_train_epochs=args.epochs,
-        # max_steps=10,
         lr_scheduler_type="linear",
         optim="adamw_torch",
         adam_beta1=args.beta1,
@@ -121,11 +98,11 @@ if __name__ == "__main__":
         adam_epsilon=1e-6,
         weight_decay=args.weight_decay,
         logging_strategy="steps",
-        logging_steps=args.logging_steps,         
+        logging_steps=args.logging_steps,          # Log every 100 steps
         eval_strategy="steps",      
         eval_steps=args.eval_steps,
         save_strategy="steps",
-        save_steps=5*args.eval_steps,
+        save_steps=args.eval_steps,
         save_total_limit=5,
         load_best_model_at_end=True,
         bf16=True,
@@ -136,18 +113,15 @@ if __name__ == "__main__":
         report_to = report_to
     )
 
-    dataset, collator, num_labels = get_dataset(task="cls") # num labels is 665
-    model = get_modernbert(task="cls", num_labels=num_labels)
     
+    dataset, collator, _ = get_dataset(task="mlm")
+    model = get_modernbert(task="mlm")
 
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset["train"],
         eval_dataset=dataset["test"],
-        data_collator=collator,
-        compute_metrics=compute_metrics)
+        data_collator=collator)
     
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
-
-    trainer.save_model("model_mbert/")
