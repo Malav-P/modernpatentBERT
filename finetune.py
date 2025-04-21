@@ -1,6 +1,7 @@
 import argparse
 import os
 import torch
+import warnings
 
 from dotenv import load_dotenv
 from sklearn.metrics import precision_recall_fscore_support, accuracy_score
@@ -11,6 +12,7 @@ from transformers import (
 
 from preprocessing import get_modernbert
 from preprocessing import get_dataset
+from trainer import ModernBertTrainer
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
@@ -94,21 +96,42 @@ if __name__ == "__main__":
     parser.add_argument(
         '--resume-from-checkpoint',
         action="store_true",
-        help="whether to resume from latest checkpoint"
+        help="whether to resume trainer from latest checkpoint. Overrides argument given to --model-checkpoint"
+    )
+    parser.add_argument(
+        '--model-checkpoint',
+        type=str,
+        default=None,
+        help="folder to model checkpoint"
+    )
+    parser.add_argument(
+        '--seq-len',
+        type=int,
+        default=1024,
+        help="Max sequence length for processing. Shorter sequences will be padded to this size, and longer sequences will be truncated."
+    )
+    parser.add_argument(
+        '--use-class-weights',
+        action="store_true",
+        help="Whether to use class weights in loss calculation to mitigate class imbalance"
     )
     args = parser.parse_args()
     
     # load environment variables
     load_dotenv()
-    if os.environ["WANDB_API_KEY"]:
+    if os.environ.get("WANDB_API_KEY"):
         print("Found WANDB_API_KEY, logging to wandb...")
         report_to = "wandb"
     else:
         os.environ["WANDB_DISABLED"] = "true"
         report_to = "none"
 
+    if args.model_checkpoint and args.resume_from_checkpoint:
+        warnings.warn("--resume-from-checkpoint will override the model weights provided by --model-checkpoint.", UserWarning)
+
+
     training_args = TrainingArguments(
-        output_dir=f"aai_ModernBERT_ft",
+        output_dir=f"ModernBERT_ft_seqlen{args.seq_len}_cw_clamp",
         learning_rate=args.lr,
         per_device_train_batch_size=args.batchsize,
         per_device_eval_batch_size=args.batchsize,
@@ -135,16 +158,19 @@ if __name__ == "__main__":
         report_to = report_to
     )
 
-    dataset, collator, num_labels = get_dataset(task="cls") # num labels is 665
-    model = get_modernbert(task="cls", num_labels=num_labels)
+    dataset, collator, num_labels, class_weights = get_dataset(task="cls", max_length=args.seq_len) # num labels is 665
+    model = get_modernbert(task="cls", num_labels=num_labels, checkpoint=args.model_checkpoint)
     
 
-    trainer = Trainer(
+    trainer = ModernBertTrainer(
         model=model,
         args=training_args,
         train_dataset=dataset["train"],
         eval_dataset=dataset["test"],
         data_collator=collator,
-        compute_metrics=compute_metrics)
+        compute_metrics=compute_metrics,
+        class_weights=class_weights if args.use_class_weights else None,
+        max_class_weight=5
+    )
     
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)

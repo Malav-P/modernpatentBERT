@@ -2,6 +2,7 @@ import numpy as np
 import json
 
 from sklearn.preprocessing import LabelEncoder
+from sklearn.utils.class_weight import compute_class_weight
 from datasets import load_dataset
 
 from collections import Counter
@@ -13,7 +14,7 @@ from transformers import (
     DataCollatorWithPadding
 )
 
-def get_dataset(task: str, test_size: float = 0.005, mlm_probability: float = 0.3):
+def get_dataset(task: str, test_size: float = 0.005, mlm_probability: float = 0.3, max_length = 1024):
     """
     Gets the dataset, the collator, and the number of classes for the task (if required)
 
@@ -21,6 +22,7 @@ def get_dataset(task: str, test_size: float = 0.005, mlm_probability: float = 0.
         task : Either "mlm" for pretraining or "cls" for finetuning. If "cls" is passes, `mlm_probability` is ignored
         test_size : fraction of dataset reserved for validation
         mlm_probability: fraction of tokens that will be masked for the MLM objective
+        max_length: max sequence length. Shorter sequences are padded (and longer sequences truncated) to this size.
 
     Returns:
         dataset : an HF dataset object
@@ -37,7 +39,7 @@ def get_dataset(task: str, test_size: float = 0.005, mlm_probability: float = 0.
         def transform(batch):
             batch["text"] = [text for text in batch["text"] if text is not None and text.strip() != ""]
 
-            return tokenizer(batch["text"], truncation=True, padding=True, max_length=1024)
+            return tokenizer(batch["text"], truncation=True, padding=True, max_length=max_length)
 
         dataset.set_transform(transform)
 
@@ -53,9 +55,10 @@ def get_dataset(task: str, test_size: float = 0.005, mlm_probability: float = 0.
             seed=42         # For reproducibility
         )
         num_labels = None 
+        class_weights = None
 
     elif task == "cls":
-        transform, num_labels = get_cls_transform("class_stats.txt", tokenizer=tokenizer)
+        transform, num_labels, class_weights = get_cls_transform("class_stats.txt", tokenizer=tokenizer, max_length=max_length)
         dataset.set_transform(transform)
 
         data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -70,21 +73,25 @@ def get_dataset(task: str, test_size: float = 0.005, mlm_probability: float = 0.
         raise ValueError(f"task not valid, given: {task}")
 
 
-    return dataset, data_collator, num_labels
+    return dataset, data_collator, num_labels, class_weights
 
-def get_modernbert(task, num_labels = 2):
+def get_modernbert(task, num_labels = 2, checkpoint = None):
     """
     Load the pretrained ModernBERT base for the task
 
     Args:
         task : Either "mlm" for pretraining or "cls" for finetuning.
         num_labels: the number of classes (needed for the "cls" task, ignored for the "mlm" task)
+        checkpoint : directory to checkpoint path. If None, a pretrained model from HF will be loaded
 
     """
+    if checkpoint is None:
+        checkpoint = "answerdotai/ModernBERT-base"
+
     if task == "mlm":
-        model = AutoModelForMaskedLM.from_pretrained("answerdotai/ModernBERT-base", device_map="auto")
+        model = AutoModelForMaskedLM.from_pretrained(checkpoint, device_map="auto")
     elif task == "cls":
-        model = AutoModelForSequenceClassification.from_pretrained("answerdotai/ModernBERT-base", device_map="auto", num_labels=num_labels) 
+        model = AutoModelForSequenceClassification.from_pretrained(checkpoint, device_map="auto", num_labels=num_labels) 
         model.config.problem_type= "multi_label_classification"
     else:
         raise ValueError(f"invalid argument for task passed: {task}")
@@ -122,8 +129,11 @@ def save_class_statistics(output_file: str):
     all_labels = [label for sublist in dataset["labels"] for label in sublist]
     counts = Counter(all_labels)
     total_unique = len(counts)
+
+    classes = list(counts.keys())
+    class_weights = dict(zip( classes, compute_class_weight("balanced", classes = np.array(classes), y = all_labels)))
     
-    stats = {"total_unique": total_unique, "counts": dict(counts)}
+    stats = {"total_unique": total_unique, "counts": dict(counts), "class_weights" : class_weights}
     
     # Write to file
     with open(output_file, 'w') as f:
@@ -131,28 +141,32 @@ def save_class_statistics(output_file: str):
     
     print(f"Class statistics saved to {output_file}")
 
-def get_cls_transform(class_stats_file: str, tokenizer):
+def get_cls_transform(class_stats_file: str, tokenizer, max_length = 1024):
     """
     Get the transform required during finetuning
     
     Args:
         class_stats_file: path to the statistics of the dataset
         tokenizer : a HF tokenizer object
+        max_length: max sequence length
 
     Returns:
-        A tuple (callable, int) of the transform function and the number of classes in the finetuning task 
+        A tuple (callable, int, list) of the transform function, the number of classes in the finetuning task, and the class weights
     """
 
     with open(class_stats_file, 'r') as f:
         stats = json.load(f)
+    
+    class_weights_dict = stats["class_weights"]
     label_encoder = LabelEncoder().fit(list(stats["counts"].keys()))
     num_labels = len(label_encoder.classes_)
+    class_weights = [class_weights_dict[key] for key in label_encoder.classes_]
 
     def transform(example):
         bsize = len(example["cpc_ids"])
         # tokenize text
         example["text"] = [text for text in example["text"] if text is not None and text.strip() != ""]
-        tokenized = tokenizer(example['text'], truncation=True, padding=True, max_length=1024)
+        tokenized = tokenizer(example['text'], truncation=True, padding=True, max_length=max_length)
 
         # process labels
         unprocessed_labels = [labels_str.split(',') for labels_str in example['cpc_ids']]
@@ -164,7 +178,14 @@ def get_cls_transform(class_stats_file: str, tokenizer):
 
         return {**tokenized, "labels" : labels}
     
-    return transform, num_labels
+    return transform, num_labels, class_weights
 
 if __name__ == "__main__":
-    pass
+    # print("Testing modernbert retrieval from local checkpoint...")
+
+    # model = get_modernbert("cls", 665, "aai_ModernBERT_ft/checkpoint-90000")
+
+    # print("Load succesful, printing model statistics...")
+    # print(model)
+
+    save_class_statistics("class_stats.txt")

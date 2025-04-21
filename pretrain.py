@@ -26,7 +26,7 @@ if __name__ == "__main__":
         help="number of epochs to train"
     )
     parser.add_argument(
-        '--batchsize',
+        '--batch-size',
         default=96,
         type=int,
         help="per device batch size"
@@ -57,7 +57,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         '--eval-steps',
-        default=10000,
+        default=500,
         type=int,
         help="number of training steps between each eval"
     )
@@ -77,7 +77,7 @@ if __name__ == "__main__":
     
     # load environment variables
     load_dotenv()
-    if os.environ["WANDB_API_KEY"]:
+    if os.environ.get("WANDB_API_KEY"):
         print("Found WANDB_API_KEY, logging to wandb...")
         report_to = "wandb"
     else:
@@ -114,7 +114,7 @@ if __name__ == "__main__":
     )
 
     
-    dataset, collator, _ = get_dataset(task="mlm")
+    dataset, collator, _, _ = get_dataset(task="mlm")
     model = get_modernbert(task="mlm")
 
     trainer = Trainer(
