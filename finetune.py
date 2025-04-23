@@ -131,7 +131,7 @@ if __name__ == "__main__":
 
 
     training_args = TrainingArguments(
-        output_dir=f"ModernBERT_ft_seqlen{args.seq_len}_cw_clamp",
+        output_dir=f"ModernBERT_ft_seqlen{args.seq_len}",
         learning_rate=args.lr,
         per_device_train_batch_size=args.batchsize,
         per_device_eval_batch_size=args.batchsize,
