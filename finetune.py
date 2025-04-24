@@ -9,8 +9,8 @@ from transformers import (
     Trainer
 )
 
-from preprocessing import get_modernbert
-from preprocessing import get_dataset
+from preprocessing import get_modernbert,get_dataset,get_sorted_class_names
+from hierachical_trainer import HierarchicalLoss, HierarchicalLossTrainer
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
@@ -96,6 +96,24 @@ if __name__ == "__main__":
         action="store_true",
         help="whether to resume from latest checkpoint"
     )
+    parser.add_argument(
+        '--lambda-hier',
+        type=float,
+        default=0.5,  # Set a default value if the user doesn't provide one
+        help="Weight factor for the hierarchical penalty in the loss function."
+    )
+    parser.add_argument(
+        '--model-output-path',
+        type=str,
+        default="model_mbert_hierarchical/",
+        help="Path to save the final model"
+    )
+    parser.add_argument(
+        '--use-hierarchical-loss',
+        action='store_true',
+        help='Use hierarchical loss if specified.'
+    )
+
     args = parser.parse_args()
     
     # load environment variables
@@ -108,7 +126,7 @@ if __name__ == "__main__":
         report_to = "none"
 
     training_args = TrainingArguments(
-        output_dir=f"aai_ModernBERT_ft",
+        output_dir=f"aai_ModernBERT_ft_hierarchical",
         learning_rate=args.lr,
         per_device_train_batch_size=args.batchsize,
         per_device_eval_batch_size=args.batchsize,
@@ -138,16 +156,46 @@ if __name__ == "__main__":
 
     dataset, collator, num_labels = get_dataset(task="cls") # num labels is 665
     model = get_modernbert(task="cls", num_labels=num_labels)
-    
 
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=dataset["train"],
-        eval_dataset=dataset["test"],
-        data_collator=collator,
-        compute_metrics=compute_metrics)
+    if args.use_hierarchical_loss:
+        # Hierarchical Loss
+        class_stats_file = "class_stats.txt"
+        sorted_class_names = get_sorted_class_names(class_stats_file)
+
+        # --- Sanity Check 
+        if len(sorted_class_names) != num_labels:
+            print(f"[Warning] Number of labels from get_dataset ({num_labels}) does not match number of classes loaded ({len(sorted_class_names)}). Using count from loaded file.")
+            num_labels = len(sorted_class_names)
+
+
+        hier_loss = HierarchicalLoss(
+            classes=sorted_class_names,
+            lambda_hier=args.lambda_hier
+        )
+
+        trainer = HierarchicalLossTrainer(
+            model=model,
+            args=training_args,
+            train_dataset=dataset["train"],
+            eval_dataset=dataset["test"],
+            data_collator=collator,
+            compute_metrics=compute_metrics,
+            hierarchical_loss_func=hier_loss 
+        )
+        print("HierarchicalLossTrainer initialized.")
+    else:
+        trainer = Trainer(
+            model=model,
+            args=training_args,
+            train_dataset=dataset["train"],
+            eval_dataset=dataset["test"],
+            data_collator=collator,
+            compute_metrics=compute_metrics
+        )
+        print("Trainer initialized.")
     
+   
     trainer.train(resume_from_checkpoint=args.resume_from_checkpoint)
 
-    trainer.save_model("model_mbert/")
+    final_model_path = args.model_output_path
+    trainer.save_model(final_model_path)

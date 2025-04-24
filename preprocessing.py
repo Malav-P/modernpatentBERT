@@ -166,5 +166,26 @@ def get_cls_transform(class_stats_file: str, tokenizer):
     
     return transform, num_labels
 
+def get_sorted_class_names(class_stats_file: str) -> list[str]:
+    """
+    Loads class statistics from a JSON file and returns a list of
+    class names sorted alphabetically.
+
+    Args:
+        class_stats_file: Path to the JSON file containing class statistics
+                          (expected to have a "counts" key with class names as keys).
+
+    Returns:
+        A list of unique class names, sorted alphabetically.
+    """
+    print(f"Loading class statistics from: {class_stats_file}")
+    with open(class_stats_file, 'r') as f:
+        stats = json.load(f)
+    class_names = list(stats["counts"].keys())
+    sorted_class_names = sorted(class_names)
+    print(f"Loaded and sorted {len(sorted_class_names)} class names.")
+    return sorted_class_names
+
+
 if __name__ == "__main__":
     pass
