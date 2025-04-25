@@ -5,7 +5,7 @@ import os
 
 SEED = 42  # Seed for reproducible shuffling/sampling
 NUM_SAMPLES = 150000 # Target number of samples for each test set
-DATASET_NAME = "MalavP/USPTO-3M"
+DATASET_NAME = "0zo/google_patentsview_claims_2016"
 SAVE_DIR = "./uspto_3m_test_sets" # Local directory to save the subsets
 
 os.makedirs(SAVE_DIR, exist_ok=True)
