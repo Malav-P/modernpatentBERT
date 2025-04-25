@@ -108,7 +108,7 @@ if __name__ == "__main__": # Added if __name__ == "__main__": block
     )
     parser.add_argument( # Added
         '--test-set-names',
-        default=["2015-B"],
+        default=["2016"],
         nargs='+', # Expect one or more arguments
         help="List of test set names (subdirectories in test_sets_dir) to evaluate"
     )
@@ -329,7 +329,15 @@ if __name__ == "__main__": # Added if __name__ == "__main__": block
             precision_at_1 = correct_at_1 / N if N > 0 else 0.0
 
             total_true_positives = true_labels_bool.sum()
-            recall_at_1 = correct_at_1 / total_true_positives if total_true_positives > 0 else 0.0
+            true_labels_indices = [set(np.where(row == 1)[0]) for row in true_labels_one_hot]
+            recall_values = [
+                1 / len(true) if pred in true else 0
+                for pred, true in zip(top_pred_indices, true_labels_indices)
+            ]
+            recall_at_1 = np.mean(recall_values)
+
+            # THIS IS WRONG, SO COMMENTED OUT
+            # recall_at_1 = correct_at_1 / total_true_positives if total_true_positives > 0 else 0.0 
 
             if precision_at_1 + recall_at_1 == 0:
                 f1_at_1 = 0.0
