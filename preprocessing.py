@@ -13,7 +13,7 @@ from transformers import (
     DataCollatorWithPadding
 )
 
-def get_dataset(task: str, test_size: float = 0.005, mlm_probability: float = 0.3):
+def get_dataset(task: str, test_size: float = 0.005, mlm_probability: float = 0.3, tokenizer_name: str = None):     
     """
     Gets the dataset, the collator, and the number of classes for the task (if required)
 
@@ -29,8 +29,9 @@ def get_dataset(task: str, test_size: float = 0.005, mlm_probability: float = 0.
     """
 
     dataset = load_dataset("MalavP/USPTO-3M", split="train")
-    model_name = "answerdotai/ModernBERT-base" 
-    tokenizer = AutoTokenizer.from_pretrained(model_name) 
+    if tokenizer_name is None:
+        tokenizer_name = "answerdotai/ModernBERT-base" 
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name) 
     
     if task == "mlm":
         # Tokenization function
@@ -55,7 +56,10 @@ def get_dataset(task: str, test_size: float = 0.005, mlm_probability: float = 0.
         num_labels = None 
 
     elif task == "cls":
-        transform, num_labels = get_cls_transform("class_stats.txt", tokenizer=tokenizer)
+        if tokenizer_name == "bert-base-uncased":
+            transform, num_labels = get_cls_transform("class_stats.txt", tokenizer=tokenizer,max_length=512)
+        else:
+            transform, num_labels = get_cls_transform("class_stats.txt", tokenizer=tokenizer)
         dataset.set_transform(transform)
 
         data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
@@ -85,6 +89,25 @@ def get_modernbert(task, num_labels = 2):
         model = AutoModelForMaskedLM.from_pretrained("answerdotai/ModernBERT-base", device_map="auto")
     elif task == "cls":
         model = AutoModelForSequenceClassification.from_pretrained("answerdotai/ModernBERT-base", device_map="auto", num_labels=num_labels) 
+        model.config.problem_type= "multi_label_classification"
+    else:
+        raise ValueError(f"invalid argument for task passed: {task}")
+
+    return model
+
+def get_bert(task, num_labels = 2):
+    """
+    Load the pretrained BERT base for the task
+
+    Args:
+        task : Either "mlm" for pretraining or "cls" for finetuning.
+        num_labels: the number of classes (needed for the "cls" task, ignored for the "mlm" task)
+
+    """
+    if task == "mlm":
+        model = AutoModelForMaskedLM.from_pretrained("bert-base-uncased")
+    elif task == "cls":
+        model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased", num_labels=num_labels) 
         model.config.problem_type= "multi_label_classification"
     else:
         raise ValueError(f"invalid argument for task passed: {task}")
@@ -131,7 +154,7 @@ def save_class_statistics(output_file: str):
     
     print(f"Class statistics saved to {output_file}")
 
-def get_cls_transform(class_stats_file: str, tokenizer):
+def get_cls_transform(class_stats_file: str, tokenizer, max_length: int = 1024):
     """
     Get the transform required during finetuning
     
@@ -152,7 +175,7 @@ def get_cls_transform(class_stats_file: str, tokenizer):
         bsize = len(example["cpc_ids"])
         # tokenize text
         example["text"] = [text for text in example["text"] if text is not None and text.strip() != ""]
-        tokenized = tokenizer(example['text'], truncation=True, padding=True, max_length=1024)
+        tokenized = tokenizer(example['text'], truncation=True, padding=True, max_length=max_length)
 
         # process labels
         unprocessed_labels = [labels_str.split(',') for labels_str in example['cpc_ids']]

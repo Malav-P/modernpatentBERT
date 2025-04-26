@@ -101,7 +101,7 @@ class HierarchicalLossTrainer(Trainer):
         # Store the instantiated hierarchical loss function
         self.hierarchical_loss_func = hierarchical_loss_func
 
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs.pop("labels")
         outputs = model(**inputs)
         logits = outputs.logits

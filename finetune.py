@@ -9,7 +9,7 @@ from transformers import (
     Trainer
 )
 
-from preprocessing import get_modernbert,get_dataset,get_sorted_class_names
+from preprocessing import get_modernbert,get_dataset,get_sorted_class_names,get_bert
 from hierachical_trainer import HierarchicalLoss, HierarchicalLossTrainer
 
 def compute_metrics(eval_pred):
@@ -105,16 +105,23 @@ if __name__ == "__main__":
     parser.add_argument(
         '--model-output-path',
         type=str,
-        default="model_mbert_hierarchical/",
+        # default="model_mbert_hierarchical/",
         help="Path to save the final model"
     )
     parser.add_argument(
         '--use-hierarchical-loss',
         action='store_true',
+        default=False,
         help='Use hierarchical loss if specified.'
     )
-
+    parser.add_argument(
+        '--use-bert',
+        action='store_true',
+        default=False,
+        help='Use BERT instead of ModernBERT if specified.'
+    )
     args = parser.parse_args()
+    print("Arguments: ", args)
     
     # load environment variables
     load_dotenv()
@@ -126,7 +133,7 @@ if __name__ == "__main__":
         report_to = "none"
 
     training_args = TrainingArguments(
-        output_dir=f"aai_ModernBERT_ft_hierarchical",
+        output_dir=args.model_output_path,
         learning_rate=args.lr,
         per_device_train_batch_size=args.batchsize,
         per_device_eval_batch_size=args.batchsize,
@@ -154,8 +161,16 @@ if __name__ == "__main__":
         report_to = report_to
     )
 
-    dataset, collator, num_labels = get_dataset(task="cls") # num labels is 665
-    model = get_modernbert(task="cls", num_labels=num_labels)
+    
+
+    if args.use_bert:
+        # Use BERT
+        print("Using BERT...")
+        dataset, collator, num_labels = get_dataset(task="cls", tokenizer_name="bert-base-uncased")
+        model = get_bert(task="cls", num_labels=num_labels)
+    else:
+        dataset, collator, num_labels = get_dataset(task="cls") # num labels is 665
+        model = get_modernbert(task="cls", num_labels=num_labels)
 
     if args.use_hierarchical_loss:
         # Hierarchical Loss
